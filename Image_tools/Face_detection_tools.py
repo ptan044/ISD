@@ -28,10 +28,54 @@ class Rectangle:
         self.angle = angle
 
 class Bounds:
-    def __init__(self, rotated_box, rotated_circle, unrot_circle):
+    def __init__(self, rotated_box:Rectangle, rotated_circle: Circle, unrot_circle: Circle):
         self.rotated_box = rotated_box
         self.rotated_circle = rotated_circle
         self.unrot_cicles = unrot_circle
+
+class Face_det_img:
+    def __init__(self):
+
+        self.img_arr = None
+        self.bound = []
+    def load(self,path, file_name):
+        self.img_arr = cv2.imread(os.path.join(path, file_name))
+
+class Database_face_det_img(Face_det_img):
+    def __init__(self):
+        super().__init__()
+        self.name = None
+        self.expression = None
+    def load(self,path,file_name):
+        """
+            Args:
+                path: The folder which the file is found
+                file_name: The name of the file, in format <Name>_<Expression>.jpeg
+
+            Returns:
+                A dictionary of the following for example:
+                {'Name': "Kenneth", 'Expression': "Sad", "Img_arr": image_arr}
+
+            """
+        details = file_name.split(".")[0]
+        self.name = details.split("_")[0]
+        self.expression = details.split("_")[1]
+
+    def save_data_base_image(self, path):
+        """
+
+        Args:
+            path:
+            file_name:
+            image_arr:
+
+        Returns:
+
+        """
+        file_name = self.
+        save_path = os.path.join(path, file_name)
+        cv2.imwrite(save_path, image_arr)
+
 
 def rotate_image(img, angle):
     if not angle == 0:
@@ -74,39 +118,6 @@ def load_images(path):
     return output
 
 
-def load_image(path, file_name):
-    """
-
-    Args:
-        path: The folder which the file is found
-        file_name: The name of the file, in format <Name>_<Expression>.jpeg
-
-    Returns:
-        A dictionary of the following for example:
-        {'Name': "Kenneth", 'Expression': "Sad", "Img_arr": image_arr}
-
-    """
-    details = file_name.split(".")[0]
-    name = details.split("_")[0]
-    expression = details.split("_")[1]
-    img_arr = cv2.imread(os.path.join(path, file_name))
-    output = {"Name": name, "Expression": expression, "Img_arr": img_arr, "Boundings": []}
-    return output
-
-
-def save_image(path, file_name, image_arr):
-    """
-
-    Args:
-        path:
-        file_name:
-        image_arr:
-
-    Returns:
-
-    """
-    save_path = os.path.join(path, file_name)
-    cv2.imwrite(save_path, image_arr)
 
 
 def get_face_bounding_boxes(image_arr):
@@ -175,11 +186,7 @@ def convert_to_BW(image_arr):
 
 
 def get_bound_box_from_dict(img_dict):
-    face_found = False
-    img_dict['Bound'] = get_face_bounding_boxes(img_dict["Img_arr"])
-    if len(img_dict):
-        face_found = True
-    return face_found
+
 
 
 def get_cropped_image_list_form_dict(img_dict):
