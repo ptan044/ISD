@@ -3,6 +3,7 @@ import argparse
 import os, os.path
 from math import sin, cos, radians
 import numpy as np
+from typing import List
 
 current_dir = os.getcwd()
 master_dir = current_dir.split("\src")[0]
@@ -13,6 +14,7 @@ BW_cropped_images_dir = os.path.join(data_dir, "BW_cropped")
 test_dir = os.path.join(data_dir, "test")
 rotation_directory = os.path.join(data_dir, "rotation_test")
 haar_cascade = os.path.join(data_dir, "haarcascade_frontalface_default.xml")
+
 face_cascade = cv2.CascadeClassifier()
 if not face_cascade.load(haar_cascade):
     print('--(!)Error loading face cascade')
@@ -37,6 +39,8 @@ class Bounds:
         self.rotated_box = rotated_box
         self.rotated_circle = rotated_circle
         self.unrot_circle = unrot_circle
+        self.name = None
+        self.img = None
 
 
 class Face_det_img:
@@ -44,11 +48,15 @@ class Face_det_img:
 
         self.img_arr = img_arr
         self.bound_list = []
-        self.selected_bound_list = []
         self.bounded_image = None
+        self.img_vector = None
+        if not self.img_arr is None:
+            self.bounded_image = self.img_arr.copy()
+        self.descriptive_vector = None
 
     def load(self, path, file_name):
         self.img_arr = cv2.imread(os.path.join(path, file_name))
+        self.bounded_image = self.img_arr.copy()
 
     # region
     def generate_bounding_boxes_rotation_invariant(self, max_angle: int = 90, min_angle: int = -90, step_size=5):
@@ -63,18 +71,23 @@ class Face_det_img:
         Returns:
 
         """
-        print("came in here")
+        shape = self.img_arr.size
         for angle in range(min_angle, max_angle, step_size):
-            # print(angle)
             rotated_img = self.__get_rotated_image(angle)
-            # print(angle)
-            # print(rotated_img)
-            bb = rotated_img.__get_face_bounding_boxes()
+            bb = rotated_img.__get_face_bounding_boxes(shape)
             for coordinates in bb:
                 bound = Bounds(Rectangle(coordinates, angle))
                 self.bound_list.append(bound)
+    def __rescale_face(self,face,shape,scale):
 
-    def __get_face_bounding_boxes(self):
+        x, y, w, h = face
+        new_w = int(w/scale)
+        new_h = int(h/scale)
+        new_x = int(x/scale)
+        new_y = int(y/scale)
+        return new_x,new_y,new_w,new_h
+
+    def __get_face_bounding_boxes(self,shape):
         """Uses Harr_like features to get bounding box for crop
 
         Args:
@@ -85,7 +98,11 @@ class Face_det_img:
 
 
         """
-        faces = face_cascade.detectMultiScale(self.img_arr, 1.3, 5)
+        reduction_factor = 0.4
+        low_dim_image = cv2.resize(self.img_arr,(0,0),fx =reduction_factor, fy = reduction_factor)
+        faces = face_cascade.detectMultiScale(low_dim_image, 1.3, 5)
+        for idx, face in enumerate(faces):
+            faces[idx] = self.__rescale_face(face, shape, reduction_factor)
         return faces
 
     def __get_rotated_image(self, angle):
@@ -102,13 +119,26 @@ class Face_det_img:
 
     def get_list_of_cropped_image(self):
 
-        output_list = []
         for idx, bounds in enumerate(self.bound_list):
             bounding_box = bounds.rotated_box
             rot_img = self.__get_rotated_image(bounding_box.angle)
-            cropped_image = rot_img.__crop_image(bounding_box.coordinates)
-            output_list.append(cropped_image)
-        return output_list
+            bounds.img = rot_img.__crop_image(bounding_box.coordinates).img_arr
+
+    def generate_all_bounds_faster(self, max_angle: int = 90, min_angle: int = -90, step_size=5):
+
+        shape = self.img_arr.shape
+        for angle in range(min_angle, max_angle, step_size):
+            rotated_img = self.__get_rotated_image(angle)
+            bb = rotated_img.__get_face_bounding_boxes(shape)
+            for coordinates in bb:
+                rect = Rectangle(coordinates, angle)
+                center, radius = self.__convert_box_to_circle(rect)
+                rotated_circle = Circle(center, radius, angle)
+                center, radius = self.__rotate_circle(center, radius, shape, angle)
+                unrot_circle = Circle(center, radius)
+                bound = Bounds(rect,rotated_circle,unrot_circle)
+                self.bound_list.append(bound)
+
 
     def __crop_image(self, bounding_box):
         """Crops image based on bounding box
@@ -124,8 +154,6 @@ class Face_det_img:
         """
 
         x, y, w, h = bounding_box
-        # resized = cv2.rectangle(self.img_arr, (x, y), (x + w, y + h + 10), (255, 255, 255),
-        #                         2)  # resized image with face detected
         cropped_arr = self.img_arr[y:y + h, x:x + w]  # cropped faces
         cropped = Face_det_img(img_arr=cropped_arr)
         cropped.__ResizeWithAspectRatio(width=100, height=100)
@@ -146,9 +174,20 @@ class Face_det_img:
             dim = (width, int(h * r))
 
         self.img_arr = cv2.resize(self.img_arr, dim, interpolation=inter)
+        if not (self.img_arr.shape[0] == height and self.img_arr.shape[1] == width):
+            print("padding reuiqred")
+            delta_w = width - self.img_arr.shape[1]
+            delta_h = height - self.img_arr.shape[0]
+            top, bottom = delta_h // 2, delta_h - (delta_h // 2)
+            left, right = delta_w // 2, delta_w - (delta_w // 2)
+            color = [255, 0, 0]
+            self.img_arr = cv2.copyMakeBorder(self.img_arr, top, bottom, left, right, cv2.BORDER_CONSTANT,
+                                        value=color)
 
     def convert_to_BW(self):
         self.img_arr = cv2.cvtColor(self.img_arr, cv2.COLOR_BGR2GRAY)
+    def normalise(self):
+        self.img_arr = cv2.normalize(self.img_arr, None, alpha=0,beta=255,norm_type=cv2.NORM_MINMAX)
 
     def remove_repeated_cricles(self, circle_centre_thrshold=0.3, radius_difference_threshold=0.3,
                                 group_acceptance_threshold=0.9):
@@ -256,6 +295,9 @@ class Face_det_img:
         y = Ty + y_offset
         center = (int(x), int(y))
         return center, radius
+    def convert_to_vector(self):
+        img = self.img_arr[0::, 0::, 0]
+        self.img_vector =img.flatten()
 
 
 class Database_face_det_img(Face_det_img):
@@ -294,33 +336,25 @@ class Database_face_det_img(Face_det_img):
 
         file_name = self.name + "_" + self.expression + ".jpg"
         save_path = os.path.join(path, file_name)
-        # print("the imag earr is: {}".format(self.img_arr))
+        print("saving {}".format(save_path))
+
         cv2.imwrite(save_path, self.img_arr)
 
-        # print("the imag earr is: {}".format(self.img_arr))
-        if not self.bounded_image is None:
-            file_name = self.name + "_" + self.expression + "bounded.jpg"
-            save_path = os.path.join(path, file_name)
-            cv2.imwrite(save_path, self.bounded_image)
+
+        # if not self.bounded_image is None:
+        #     file_name = self.name + "_" + self.expression + "bounded.jpg"
+        #     save_path = os.path.join(path, file_name)
+        #     cv2.imwrite(save_path, self.bounded_image)
 
     def get_list_of_cropped_data_base_image(self):
         data_base_image_list = []
-        image_list = super().get_list_of_cropped_image()
-        for idx, image in enumerate(image_list):
-            data_base_image = Database_face_det_img(image.img_arr)
+        super().get_list_of_cropped_image()
+        for idx, bounds in enumerate(self.bound_list):
+            data_base_image = Database_face_det_img(bounds.img)
             data_base_image.name = self.name
             data_base_image.expression = self.expression + str(idx)
             data_base_image_list.append(data_base_image)
         return data_base_image_list
-
-
-def rotate_point(boundingbox, img, angle):
-    if angle == 0: return boundingbox
-    x = boundingbox[0] - img.shape[1] * 0.4
-    y = boundingbox[1] - img.shape[0] * 0.4
-    newx = x * cos(radians(angle)) - y * sin(radians(angle)) + img.shape[1] * 0.5
-    newy = x * sin(radians(angle)) + y * cos(radians(angle)) + img.shape[0] * 0.5
-    return int(newx), int(newy), boundingbox[2], boundingbox[3]
 
 
 def load_images(path):
@@ -347,55 +381,39 @@ def load_images(path):
     return output
 
 
-def rotate_back_rectangles(img_dict):
-    unrotated_bounding_boxes = []
-    for bounding_box in img_dict["Rot_bounding_boxes"]:
-        new_box = rotate_point(bounding_box["Bounding_box"][0], img_dict["Img_arr"], bounding_box["Angle"])
-        unrotated_bounding_boxes.append(new_box)
-    img_dict["Unrotated_bounding_box"] = unrotated_bounding_boxes
-
-
 if __name__ == "__main__":
     images = load_images(raw_images_dir)
     for image in images:
-        image.convert_to_BW()
+        # image.convert_to_BW()
         image.generate_bounding_boxes_rotation_invariant(1,0,10)
         image.convert_rotbb_to_circle()
         image.un_rotate_circles()
         image.remove_repeated_cricles()
         cropped_images_list = image.get_list_of_cropped_data_base_image()
+
         for cropped_image in cropped_images_list:
+            cropped_image.convert_to_BW()
+            cropped_image.normalise()
             cropped_image.save_data_base_image(cropped_images_dir)
 
-    test_image_name_1 = "Pin Da_test.jpg"
-    test_image_1 = os.path.join(raw_images_dir, test_image_name_1)
-
-    test_img = Database_face_det_img()
-    print("Loading....")
-    test_img.load(raw_images_dir, test_image_name_1)
-    print("Loaded....")
-    # test_img.convert_to_BW()
-    print("getting bounds...")
-    test_img.generate_bounding_boxes_rotation_invariant(60, -60, 15)
-    print("bounds obtained")
-    test_img.convert_rotbb_to_circle()
-    test_img.un_rotate_circles()
-
-    test_img.remove_repeated_cricles()
-    for bounds in test_img.bound_list:
-        test_img.draw_circles(bounds.unrot_circle)
-    test_img.save_data_base_image(test_dir)
-
-
-
-    # image1 = load_image(raw_images_dir, test_image_name_1)
-    # get_bounding_boxes_rotation_invariant(image1)
-    # convert_rotbb_to_circle(image1)
-    # un_rotate_circles(image1)
-    # draw_circles_from_dict(image1, "unrot_bounding_circles")
-    # remove_repeated_cricles(image1, "unrot_bounding_circles")
-    # save_image(rotation_directory, "detected_circles.jpg", image1["Img_arr"])
+    # test_image_name_1 = "Pin Da_test.jpg"
+    # test_image_1 = os.path.join(raw_images_dir, test_image_name_1)
     #
-    # test_circle = image1["unrot_bounding_circles"][0]
-    # label_circle = image1["unrot_bounding_circles"][1]
-    # print(if_close_circle(test_circle, label_circle, 0.1, 0.1))
+    # test_img = Database_face_det_img()
+    # print("Loading....")
+    # test_img.load(raw_images_dir, test_image_name_1)
+    # print("Loaded....")
+    # # test_img.convert_to_BW()
+    # print("getting bounds...")
+    # test_img.generate_bounding_boxes_rotation_invariant(60, -60, 15)
+    # print("bounds obtained")
+    # test_img.convert_rotbb_to_circle()
+    # test_img.un_rotate_circles()
+    #
+    # test_img.remove_repeated_cricles()
+    # for bounds in test_img.bound_list:
+    #     test_img.draw_circles(bounds.unrot_circle)
+    # test_img.save_data_base_image(test_dir)
+
+
+
